@@ -56,3 +56,7 @@ _darcs
 
 wandb
 amlt
+
+/configs/*.bin
+1.py
+.gitignore

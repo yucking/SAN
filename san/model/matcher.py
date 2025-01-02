@@ -10,6 +10,9 @@ from torch import nn
 from torch.cuda.amp import autocast
 
 from detectron2.projects.point_rend.point_features import point_sample
+# import os
+# os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+
 
 
 def batch_dice_loss(inputs: torch.Tensor, targets: torch.Tensor):
@@ -109,6 +112,10 @@ class HungarianMatcher(nn.Module):
                 -1
             )  # [num_queries, num_classes]
             tgt_ids = targets[b]["labels"]
+
+            num_classes = out_prob.shape[1]
+            tgt_ids = torch.clamp(tgt_ids, 0, num_classes - 1)
+
 
             # Compute the classification cost. Contrary to the loss, we don't use the NLL,
             # but approximate it in 1 - proba[target class].
