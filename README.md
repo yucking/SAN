@@ -99,6 +99,32 @@ ade20k_full_sem_seg_*: ADE-847
 
 ### Usage
 
+- #### my use process
+  ```sh
+  conda create --name san38 python=3.8
+  pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0 --extra-index-url https://download.pytorch.org/whl/cu113
+  pip install ./configs/detectron2-0.6+2a420edpt1.11.0cu113-cp38-cp38-linux_x86_64.whl
+  
+  pip install timm==0.6.12
+  pip install open_clip_torch==2.16.0
+  pip install opencv-python
+  pip install wandb
+  pip install scipy
+  export HF_ENDPOINT="https://hf-mirror.com"
+  # export CUDA_LAUNCH_BLOCKING=1
+
+  python datasets/prepare_coco_stuff_164k_sem_seg.py datasets/coco
+  python tools/mask_cls_collect.py datasets/coco/stuffthingmaps_detectron2/train2017_base datasets/coco/stuffthingmaps_detectron2/train2017_base_label_count.pkl
+  python tools/mask_cls_collect.py datasets/coco/stuffthingmaps_detectron2/val2017 datasets/coco/stuffthingmaps_detectron2/val2017_label_count.pkl
+
+  CUDA_VISIBLE_DEVICES=2,3 python train_net.py --config-file configs/san_clip_vit_res4_coco.yaml --num-gpus 2 OUTPUT_DIR ./output/train_vit_1  WANDB.NAME output/san_clip_vit_res4_coco_1.log
+  ```
+
+
+
+
+
+
 
 - #### Pretrained Weights
 
