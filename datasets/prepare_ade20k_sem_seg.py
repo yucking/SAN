@@ -27,3 +27,4 @@ if __name__ == "__main__":
         for file in tqdm.tqdm(list(annotation_dir.iterdir())):
             output_file = output_dir / file.name
             convert(file, output_file)
+    

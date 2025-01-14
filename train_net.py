@@ -48,6 +48,9 @@ from san.utils import WandbWriter, setup_wandb
 
 
 class Trainer(DefaultTrainer):
+    '''
+    重写父类(DefaultTrainer)的 build_writers 方法，将默认的写入器(如Tensorboard)替换为自定义的 WandbWriter,用于记录训练过程中的信息到 Weights & Biases(wandb)
+    '''
     def build_writers(self):
         writers = super().build_writers()
         # use wandb writer instead.
@@ -56,7 +59,18 @@ class Trainer(DefaultTrainer):
 
     @classmethod
     def build_evaluator(cls, cfg, dataset_name, output_folder=None):
-        if output_folder is None:
+        '''
+        功能:根据给定的数据集名称和配置构建评估器,支持不同类型的评估器,如语义分割评估器、Cityscapes评估器等。
+
+        如果没有提供 output_folder,则使用默认路径 cfg.OUTPUT_DIR/inference。
+        获取数据集的评估器类型 (evaluator_type)。
+        如果是语义分割或 ADE20K 类型的数据集，则添加 SemSegEvaluator 到评估器列表。
+        如果是 cityscapes_sem_seg 类型的数据集，使用 CityscapesSemSegEvaluator,并检查是否支持多机器。
+        如果没有匹配的评估器类型，抛出 NotImplementedError。
+        如果有多个评估器，返回 DatasetEvaluators 对象，包含所有评估器。
+        如果只有一个评估器，直接返回该评估器。
+        '''
+        if output_folder is None: 
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
         evaluator_list = []
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
@@ -88,28 +102,39 @@ class Trainer(DefaultTrainer):
 
     @classmethod
     def build_train_loader(cls, cfg):
+        '''
+        功能：根据配置构建训练数据加载器，并且使用自定义的 MaskFormerSemanticDatasetMapper 进行数据映射。
+
+        '''
         # resue maskformer dataset mapper
         if cfg.INPUT.DATASET_MAPPER_NAME == "mask_former_semantic":
             mapper = MaskFormerSemanticDatasetMapper(cfg, True)
             return build_detection_train_loader(cfg, mapper=mapper)
         else:
-            mapper = None
+            mapper = None # build the default mapper
             return build_detection_train_loader(cfg, mapper=mapper)
 
     @classmethod
     def build_test_loader(cls, cfg, dataset_name):
+        '''
+        功能：构建测试数据加载器。'''
         # Add dataset meta info.
         return build_detection_test_loader(cfg, dataset_name)
 
     @classmethod
     def build_lr_scheduler(cls, cfg, optimizer):
+        '''
+        功能：构建学习率调度器，使用配置文件中指定的学习率调度策略
+        '''
         # use poly scheduler
         return build_lr_scheduler(cfg, optimizer)
 
     @classmethod
     def build_optimizer(cls, cfg, model):
-        weight_decay_norm = cfg.SOLVER.WEIGHT_DECAY_NORM
-        weight_decay_embed_group = cfg.SOLVER.WEIGHT_DECAY_EMBED_GROUP
+        '''
+        功能：根据配置文件中的超参数构建优化器，支持 SGD 和 ADAMW 优化器，并根据不同条件（如梯度裁剪、不同模块的权重衰减）调整优化器的超参数'''
+        weight_decay_norm = cfg.SOLVER.WEIGHT_DECAY_NORM  # ??? ----没找到参数默认值
+        weight_decay_embed_group = cfg.SOLVER.WEIGHT_DECAY_EMBED_GROUP 
         weight_decay_embed = cfg.SOLVER.WEIGHT_DECAY_EMBED
 
         defaults = {}
@@ -130,18 +155,21 @@ class Trainer(DefaultTrainer):
             torch.nn.LocalResponseNorm,
         )
 
+        '''
+        为模型中的不同参数设置不同的优化超参数,如学习率(r)和权重衰减(weight_decay)
+        '''
         params: List[Dict[str, Any]] = []
         memo: Set[torch.nn.parameter.Parameter] = set()
         for module_name, module in model.named_modules():
             for module_param_name, value in module.named_parameters(recurse=False):
-                if not value.requires_grad:
+                if not value.requires_grad: # 如果参数不需要梯度，则跳过
                     continue
                 # Avoid duplicating parameters
-                if value in memo:
+                if value in memo: # 如果参数已经在 memo 中，则跳过
                     continue
                 memo.add(value)
 
-                hyperparams = copy.copy(defaults)
+                hyperparams = copy.copy(defaults) # 复制默认的超参数
                 hyperparams["param_name"] = ".".join([module_name, module_param_name])
                 if "side_adapter_network" in module_name:
                     hyperparams["lr"] = (
@@ -160,7 +188,7 @@ class Trainer(DefaultTrainer):
 
         def maybe_add_full_model_gradient_clipping(optim):
             # detectron2 doesn't have full model gradient clipping now
-            clip_norm_val = cfg.SOLVER.CLIP_GRADIENTS.CLIP_VALUE
+            clip_norm_val = cfg.SOLVER.CLIP_GRADIENTS.CLIP_VALUE # 获取梯度裁剪的阈值
             enable = (
                 cfg.SOLVER.CLIP_GRADIENTS.ENABLED
                 and cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE == "full_model"
@@ -172,7 +200,7 @@ class Trainer(DefaultTrainer):
                     all_params = itertools.chain(
                         *[x["params"] for x in self.param_groups]
                     )
-                    torch.nn.utils.clip_grad_norm_(all_params, clip_norm_val)
+                    torch.nn.utils.clip_grad_norm_(all_params, clip_norm_val) # 使用的是缩放裁剪
                     super().step(closure=closure)
 
             return FullModelGradientClippingOptimizer if enable else optim
@@ -201,7 +229,7 @@ class Trainer(DefaultTrainer):
             total_params_size += group["params"][0].numel()
             optim_info["Lr"].append(group["lr"])
             optim_info["Wd"].append(group["weight_decay"])
-        # Counting the number of parameters
+        # Counting the number of parameters 打印表格
         optim_info["Param Name"].append("Total")
         optim_info["Param Shape"].append("{:.2f}M".format(total_params_size / 1e6))
         optim_info["Lr"].append("-")
@@ -222,6 +250,7 @@ class Trainer(DefaultTrainer):
     def test_with_TTA(cls, cfg, model):
         logger = logging.getLogger("detectron2.trainer")
         # In the end of training, run an evaluation with TTA.
+        # 测试时间增强是一种在测试阶段对输入数据进行数据增强的技术，以提高模型的泛化能力。
         logger.info("Running inference with test-time augmentation ...")
         model = SemanticSegmentorWithTTA(cfg, model)
         evaluators = [
